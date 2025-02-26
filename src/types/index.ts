@@ -11,6 +11,19 @@ export interface Concert {
   url: string;
 }
 
+export interface ConcertLink {
+  url: string;
+  title: string;
+}
+
+export interface ExtractedInfo {
+  events: Array<{
+    date: string;
+    location: string;
+  }>;
+  contact?: Contact;
+}
+
 export interface OpenAIConfig {
   apiKey: string;
   model: string;
