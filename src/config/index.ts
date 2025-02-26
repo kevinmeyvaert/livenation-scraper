@@ -9,7 +9,7 @@ export const config: ScraperConfig = {
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: 'gpt-3.5-turbo',
-    temperature: 0.3,
-    maxTokens: 150,
+    temperature: 0,
+    maxTokens: 1000,
   },
 };

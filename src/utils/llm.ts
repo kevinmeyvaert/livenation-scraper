@@ -17,87 +17,6 @@ const openai = new OpenAI({
   apiKey: config.openai.apiKey,
 });
 
-const EXTRACTION_PROMPT = `Extract concert dates, locations, and contact information from the following text.
-Return the information in this exact JSON format:
-{
-  "events": [
-    {
-      "date": "DD month YYYY",
-      "location": "Venue Name, City"
-    },
-    ...
-  ],
-  "contact": {
-    "name": "Full Name",
-    "email": "email@address"
-  }
-}
-
-Rules for extraction:
-1. Each unique date-location combination should be a separate event in the events array
-2. Dates should be in the format "DD month YYYY" (e.g., "24 juni 2025")
-3. Location should ONLY include the venue name and city, separated by comma (e.g., "Vorst Nationaal, Brussel")
-4. Only include confirmed dates and locations
-5. For locations, only extract actual venue names (like "Vorst Nationaal", "Ancienne Belgique", "La Madeleine", etc.) and cities (like "Brussel", "Antwerpen")
-6. Do NOT include any descriptive text or narrative in the location field
-7. Standardize city names to "Brussel" and "Antwerpen"
-8. For contact information:
-   - Look for these exact patterns:
-     * "Voor meer informatie kunt u contact opnemen met: [Name]" or similar Dutch phrases
-     * "Contact: [Name]" or "Perscontact: [Name]"
-     * "Voor persvragen: [Name]"
-   - If these patterns are not found, look for the role of the contact in the text (e.g. Asst. booker/promoter, Marcom manager, Marketing & Communication Manager or similar)
-   - Look for email addresses near contact names
-   - Check for contact information in footers or contact sections
-   - ONLY include contact information if it's specifically for press/media contacts
-   - If no clear press contact is found, omit the contact field entirely
-9. Email addresses should be complete and properly formatted
-10. The detail pages usually have text that starts with the date and location of publication of the article, this is usually marked in an <em> tag. And usually this location is Mechelen. This is not the date, nor the location of the concert, so ignore it.
-
-Example good output with multiple events and contact:
-{
-  "events": [
-    {
-      "date": "26 maart 2026",
-      "location": "Koninklijk Circus, Brussel"
-    },
-    {
-      "date": "27 maart 2026",
-      "location": "De Roma, Antwerpen"
-    }
-  ],
-  "contact": {
-    "name": "John Smith",
-    "email": "john.smith@livenation.be"
-  }
-}
-
-Example good output with single event and no contact:
-{
-  "events": [
-    {
-      "date": "24 juni 2025",
-      "location": "Vorst Nationaal, Brussel"
-    }
-  ]
-}
-
-Example bad output (too much narrative text):
-{
-  "events": [
-    {
-      "date": "24 juni 2025",
-      "location": "komt naar Vorst Nationaal in Brussel voor een spetterend concert"
-    }
-  ],
-  "contact": {
-    "name": "Voor meer informatie kunt u contact opnemen met Kaat",
-    "email": "email hieronder: kaat.bosch@livenation.be"
-  }
-}
-
-Text to analyze:`;
-
 export async function extractInfoWithLLM(
   text: string,
   retryCount = 0
@@ -153,8 +72,8 @@ ${text}`;
         },
       ],
       model: config.openai.model,
-      temperature: 0, // Use 0 temperature for maximum consistency
-      max_tokens: 1000, // Increase token limit for better context
+      temperature: config.openai.temperature,
+      max_tokens: config.openai.maxTokens, // Increase token limit for better context
       response_format: { type: 'json_object' },
     });
 
