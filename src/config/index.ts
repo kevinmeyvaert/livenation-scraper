@@ -10,6 +10,6 @@ export const config: ScraperConfig = {
     apiKey: process.env.OPENAI_API_KEY || '',
     model: 'gpt-3.5-turbo',
     temperature: 0,
-    maxTokens: 1000,
+    maxTokens: 2000,
   },
 };

@@ -63,15 +63,16 @@ export class ScraperService {
 
   private async extractConcertLinks(): Promise<ConcertLink[]> {
     const links = await this.page.evaluate(() => {
-      const cards = document.querySelectorAll('.StoryCard_container__KVQRO');
+      const cards = document.querySelectorAll('.StoryCard_container__MsB7x');
+
       return Array.from(cards)
         .map((card) => {
           const link = card.querySelector(
-            'a.StoryCard_titleLink__El6wj'
+            'a[class*="StoryCard_titleLink"]'
           ) as HTMLAnchorElement | null;
           const title =
             card
-              .querySelector('.StoryCard_title__c4NTz')
+              .querySelector('[class*="StoryCard_title"]')
               ?.textContent?.trim() || '';
           return link?.href ? { url: link.href, title } : null;
         })
@@ -96,20 +97,72 @@ export class ScraperService {
 
   private async extractPageContent() {
     return this.page.evaluate(() => {
-      const allElements = Array.from(document.querySelectorAll('body *'))
-        .filter((el) => {
-          const display = window.getComputedStyle(el).display;
-          return display !== 'none' && el.textContent?.trim();
-        })
-        .map((el) => el.textContent?.trim())
-        .filter(Boolean) as string[];
+      // More selective content extraction to reduce token usage
+      const contentSelectors = [
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        '[class*="title"]',
+        '[class*="Title"]',
+        '[class*="content"]',
+        '[class*="Content"]',
+        '[class*="description"]',
+        '[class*="Description"]',
+        '[class*="date"]',
+        '[class*="Date"]',
+        '[class*="location"]',
+        '[class*="Location"]',
+        '[class*="venue"]',
+        '[class*="Venue"]',
+        '[class*="contact"]',
+        '[class*="Contact"]',
+        '[class*="press"]',
+        '[class*="Press"]',
+        'p',
+        'span',
+        'div',
+      ];
 
-      const contactSection =
-        document.querySelector('.contact-info, .press-contact, footer')
-          ?.textContent || '';
+      const relevantElements: string[] = [];
 
-      const fullText = `${allElements.join('\n')}\n${contactSection}`;
-      return { fullText };
+      for (const selector of contentSelectors) {
+        const elements = document.querySelectorAll(selector);
+        Array.from(elements).forEach((el) => {
+          const text = el.textContent?.trim();
+          if (text && text.length > 10 && text.length < 500) {
+            // Filter out navigation, menu items, and other irrelevant content
+            const lowerText = text.toLowerCase();
+            if (
+              !lowerText.includes('cookie') &&
+              !lowerText.includes('menu') &&
+              !lowerText.includes('navigation') &&
+              !lowerText.includes('footer') &&
+              !lowerText.includes('header') &&
+              text.split(' ').length > 2
+            ) {
+              relevantElements.push(text);
+            }
+          }
+        });
+      }
+
+      // Remove duplicates and limit content
+      const uniqueContent = [...new Set(relevantElements)];
+      const limitedContent = uniqueContent.slice(0, 50); // Limit to first 50 unique pieces of content
+
+      const fullText = limitedContent.join('\n');
+
+      // Ensure we don't exceed reasonable length
+      const maxLength = 8000; // Conservative limit for GPT-4
+      return {
+        fullText:
+          fullText.length > maxLength
+            ? fullText.substring(0, maxLength) + '...'
+            : fullText,
+      };
     });
   }
 
