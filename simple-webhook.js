@@ -1,5 +1,6 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -19,7 +20,7 @@ process.on('SIGINT', () => {
 // Health check endpoint
 app.get('/', (req, res) => {
   res.json({ 
-    status: 'Scraper webhook server is running', 
+    status: 'Simple webhook server is running', 
     timestamp: new Date().toISOString(),
     port: PORT,
     env: {
@@ -45,19 +46,19 @@ function checkEnvironment() {
   if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON && 
       !process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE && 
       !process.env.GOOGLE_API_KEY) {
-    missing.push('Google authentication (GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_SERVICE_ACCOUNT_KEY_FILE, or GOOGLE_API_KEY)');
+    missing.push('Google authentication');
   }
   
   return missing;
 }
 
-// Function to run scraper with better process management
-function runScraper() {
+// Function to run scraper directly with node
+function runScraperDirect() {
   return new Promise((resolve, reject) => {
-    console.log('Starting scraper process...');
+    console.log('Starting scraper process directly...');
     
-    // Use spawn instead of exec for better process control
-    const scraperProcess = spawn('npm', ['run', 'start'], {
+    // Run the compiled JavaScript directly
+    const scraperProcess = spawn('node', ['dist/index.js'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
       timeout: 300000 // 5 minutes
@@ -83,7 +84,14 @@ function runScraper() {
       
       if (code === 0) {
         console.log('Scraper completed successfully');
-        resolve({ success: true, stdout, stderr });
+        
+        // Now run the Google Sheets append
+        runSheetsAppend()
+          .then(() => resolve({ success: true, stdout, stderr }))
+          .catch((sheetsError) => {
+            console.error('Sheets append failed:', sheetsError);
+            resolve({ success: true, stdout, stderr, sheetsError });
+          });
       } else {
         console.error(`Scraper failed with exit code ${code}`);
         reject({ success: false, code, signal, stdout, stderr });
@@ -96,6 +104,51 @@ function runScraper() {
     });
     
     console.log('Scraper process started with PID:', scraperProcess.pid);
+  });
+}
+
+// Function to run Google Sheets append
+function runSheetsAppend() {
+  return new Promise((resolve, reject) => {
+    console.log('Starting Google Sheets append...');
+    
+    const sheetsProcess = spawn('node', ['-r', 'ts-node/register', 'src/append-to-sheets.ts'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+      timeout: 60000 // 1 minute
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    sheetsProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      console.log('Sheets stdout:', output);
+      stdout += output;
+    });
+    
+    sheetsProcess.stderr.on('data', (data) => {
+      const output = data.toString();
+      console.error('Sheets stderr:', output);
+      stderr += output;
+    });
+    
+    sheetsProcess.on('close', (code, signal) => {
+      console.log(`Sheets process closed with code ${code} and signal ${signal}`);
+      
+      if (code === 0) {
+        console.log('Google Sheets append completed successfully');
+        resolve({ success: true, stdout, stderr });
+      } else {
+        console.error(`Sheets append failed with exit code ${code}`);
+        reject({ success: false, code, signal, stdout, stderr });
+      }
+    });
+    
+    sheetsProcess.on('error', (error) => {
+      console.error('Sheets process error:', error);
+      reject({ success: false, error: error.message, stdout, stderr });
+    });
   });
 }
 
@@ -120,20 +173,19 @@ app.post('/webhook/scrape', async (req, res) => {
   res.json({ 
     status: 'Scraper started', 
     timestamp: new Date().toISOString(),
-    message: 'Scraping process initiated in background'
+    message: 'Scraping process initiated in background (direct mode)'
   });
   
   // Run scraper in background
-  runScraper().catch((error) => {
+  runScraperDirect().catch((error) => {
     console.error('Scraper failed:', error);
   });
 });
 
-// Optional: Endpoint to trigger scraper manually via GET
+// Manual trigger endpoint
 app.get('/webhook/scrape', async (req, res) => {
   console.log('Manual scrape triggered:', new Date().toISOString());
   
-  // Check environment variables
   const missingEnvVars = checkEnvironment();
   if (missingEnvVars.length > 0) {
     const errorMsg = `Missing required environment variables: ${missingEnvVars.join(', ')}`;
@@ -148,47 +200,15 @@ app.get('/webhook/scrape', async (req, res) => {
   res.json({ 
     status: 'Scraper started', 
     timestamp: new Date().toISOString(),
-    message: 'Scraping process initiated in background'
+    message: 'Scraping process initiated in background (direct mode)'
   });
   
-  runScraper().catch((error) => {
+  runScraperDirect().catch((error) => {
     console.error('Scraper failed:', error);
   });
 });
 
-// Test endpoint to check just the build
-app.get('/test/build', (req, res) => {
-  console.log('Testing build process:', new Date().toISOString());
-  
-  res.json({ 
-    status: 'Build test started', 
-    timestamp: new Date().toISOString(),
-    message: 'Testing TypeScript build process'
-  });
-  
-  const buildProcess = spawn('npm', ['run', 'build'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.env
-  });
-  
-  buildProcess.stdout.on('data', (data) => {
-    console.log('Build stdout:', data.toString());
-  });
-  
-  buildProcess.stderr.on('data', (data) => {
-    console.error('Build stderr:', data.toString());
-  });
-  
-  buildProcess.on('close', (code) => {
-    if (code === 0) {
-      console.log('Build completed successfully');
-    } else {
-      console.error('Build failed with exit code:', code);
-    }
-  });
-});
-
-// Simple test endpoint that doesn't run any subprocesses
+// Simple test endpoint
 app.get('/test/simple', (req, res) => {
   res.json({
     status: 'Simple test successful',
@@ -198,10 +218,9 @@ app.get('/test/simple', (req, res) => {
 });
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Webhook server running on port ${PORT}`);
+  console.log(`Simple webhook server running on port ${PORT}`);
   console.log(`Webhook URL: http://localhost:${PORT}/webhook/scrape`);
   console.log(`Health check: http://localhost:${PORT}/`);
-  console.log(`Build test: http://localhost:${PORT}/test/build`);
   console.log(`Simple test: http://localhost:${PORT}/test/simple`);
   
   // Check environment on startup
